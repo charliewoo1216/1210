@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kafka MES 파이프라인 설계</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', 'Noto Sans KR', sans-serif;
+    background: #0f0f1a;
+    color: #e8eaf6;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  /* ── 슬라이드 컨테이너 ── */
+  #deck {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+    flex-direction: column;
+    padding: 48px 64px 36px;
+    background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 60%, #16213e 100%);
+  }
+  .slide.active { display: flex; }
+
+  /* ── 슬라이드 번호 배지 ── */
+  .slide-num {
+    position: absolute;
+    bottom: 18px;
+    right: 32px;
+    font-size: 13px;
+    color: #4a5568;
+    letter-spacing: 1px;
+  }
+
+  /* ── 공통 헤더 ── */
+  .slide-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #7c83fd;
+    border-left: 5px solid #7c83fd;
+    padding-left: 16px;
+    margin-bottom: 28px;
+    flex-shrink: 0;
+  }
+  .slide-subtitle {
+    font-size: 16px;
+    color: #a0aec0;
+    margin-top: 6px;
+    font-weight: 400;
+  }
+
+  /* ── 타이틀 슬라이드 ── */
+  .title-slide {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+  }
+  .title-slide .main-title {
+    font-size: 52px;
+    font-weight: 800;
+    background: linear-gradient(90deg, #7c83fd, #a78bfa, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.2;
+    margin-bottom: 20px;
+  }
+  .title-slide .main-sub {
+    font-size: 22px;
+    color: #94a3b8;
+    margin-bottom: 40px;
+  }
+  .pill-row {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .pill {
+    background: rgba(124,131,253,0.15);
+    border: 1px solid rgba(124,131,253,0.4);
+    color: #a5b4fc;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  /* ── Mermaid 래퍼 ── */
+  .mermaid-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .mermaid-wrap .mermaid {
+    max-width: 100%;
+    max-height: 100%;
+  }
+
+  /* ── 2-컬럼 레이아웃 ── */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    flex: 1;
+    overflow: hidden;
+  }
+  .col-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 20px 24px;
+    overflow: auto;
+  }
+  .col-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #a78bfa;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .col-title::before {
+    content: '';
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #a78bfa;
+    flex-shrink: 0;
+  }
+
+  /* ── 테이블 ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th {
+    background: rgba(124,131,253,0.2);
+    color: #c7d2fe;
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+  }
+  td {
+    padding: 7px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    color: #cbd5e1;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+  /* ── 코드 블록 ── */
+  pre {
+    background: #0d1117;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 12px;
+    line-height: 1.65;
+    color: #c9d1d9;
+    overflow: auto;
+    font-family: 'Fira Code', 'Consolas', monospace;
+  }
+  .kw { color: #ff7b72; }
+  .str { color: #a5d6ff; }
+  .cm { color: #6e7681; font-style: italic; }
+  .num { color: #79c0ff; }
+
+  /* ── 배지 ── */
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .badge-green  { background: rgba(74,222,128,0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+  .badge-yellow { background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+  .badge-red    { background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+  .badge-blue   { background: rgba(96,165,250,0.15); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+
+  /* ── threshold 카드 ── */
+  .thresh-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    flex: 1;
+  }
+  .thresh-card {
+    border-radius: 10px;
+    padding: 18px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid transparent;
+  }
+  .thresh-card.green  { background: rgba(74,222,128,0.08);  border-color: rgba(74,222,128,0.25); }
+  .thresh-card.yellow { background: rgba(251,191,36,0.08);  border-color: rgba(251,191,36,0.25); }
+  .thresh-card.red    { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.25); }
+  .thresh-card.purple { background: rgba(167,139,250,0.08); border-color: rgba(167,139,250,0.25); }
+  .thresh-val {
+    font-size: 22px;
+    font-weight: 800;
+  }
+  .thresh-label { font-size: 13px; color: #94a3b8; line-height: 1.4; }
+  .thresh-action { font-size: 13px; font-weight: 600; margin-top: auto; }
+
+  /* ── 흐름 카드 (retry/dlq 요약) ── */
+  .flow-strip {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+  .flow-box {
+    flex: 1;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 14px 10px;
+    text-align: center;
+    font-size: 13px;
+    color: #e2e8f0;
+  }
+  .flow-box strong { display: block; font-size: 15px; color: #7c83fd; margin-bottom: 4px; }
+  .flow-arrow {
+    font-size: 22px;
+    color: #4a5568;
+    padding: 0 6px;
+    flex-shrink: 0;
+  }
+
+  /* ── Backoff 타임라인 ── */
+  .backoff-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .backoff-item {
+    flex: 1;
+    background: rgba(96,165,250,0.08);
+    border: 1px solid rgba(96,165,250,0.2);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+  .backoff-n { font-size: 22px; font-weight: 800; color: #60a5fa; }
+  .backoff-t { font-size: 13px; color: #94a3b8; margin-top: 4px; }
+
+  /* ── 요약 슬라이드 ── */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 20px;
+    flex: 1;
+  }
+  .sum-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(124,131,253,0.2);
+    border-radius: 14px;
+    padding: 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .sum-card h3 {
+    font-size: 17px;
+    font-weight: 700;
+    color: #a78bfa;
+  }
+  .sum-card ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .sum-card li {
+    font-size: 13px;
+    color: #94a3b8;
+    padding-left: 16px;
+    position: relative;
+    line-height: 1.5;
+  }
+  .sum-card li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: #7c83fd;
+  }
+
+  /* ── 네비게이션 ── */
+  #nav {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: rgba(15,15,26,0.85);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 50px;
+    padding: 10px 24px;
+    z-index: 100;
+  }
+  #nav button {
+    background: rgba(124,131,253,0.2);
+    border: 1px solid rgba(124,131,253,0.4);
+    color: #a5b4fc;
+    padding: 8px 20px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all .2s;
+  }
+  #nav button:hover { background: rgba(124,131,253,0.4); }
+  #nav button:disabled { opacity: 0.3; cursor: default; }
+  #slide-counter {
+    font-size: 13px;
+    color: #64748b;
+    min-width: 60px;
+    text-align: center;
+  }
+
+  /* ── 점 인디케이터 ── */
+  #dots {
+    position: fixed;
+    right: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 100;
+  }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .dot.active { background: #7c83fd; transform: scale(1.4); }
+
+  /* mermaid 다이어그램 색 오버라이드 */
+  .mermaid svg { max-height: 480px; }
+</style>
+</head>
+<body>
+
+<div id="deck">
+
+  <!-- ══════════════════════════════════════════
+       SLIDE 1 — TITLE
+  ══════════════════════════════════════════ -->
+  <div class="slide title-slide active" id="s1">
+    <div class="main-title">Kafka MES<br>파이프라인 설계</div>
+    <div class="main-sub">Kafka · LLM Selector · Parser Plugin · Retry/DLQ</div>
+    <div class="pill-row">
+      <span class="pill">A. 토픽/파티션 설계</span>
+      <span class="pill">B. Parser 플러그인</span>
+      <span class="pill">C. LLM Selector 튜닝</span>
+      <span class="pill">D. Retry / DLQ 전략</span>
+    </div>
+    <div class="slide-num">1 / 8</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       SLIDE 2 — 전체 워크플로우
+  ══════════════════════════════════════════ -->
+  <div class="slide" id="s2">
+    <div class="slide-title">전체 워크플로우
+      <div class="slide-subtitle">MES 이벤트 → Kafka 파이프라인 → DB 저장 전 과정</div>
+    </div>
+    <div class="mermaid-wrap">
+      <div class="mermaid">
+flowchart LR
+    MES([MES 시스템]) -->|이벤트 발행| RAW[["mes.raw\n12p · 7d"]]
+    RAW --> FILT[Filter\nService]
+    FILT -->|정상| FILTERED[["mes.filtered\n6p · 3d"]]
+    FILT -->|실패| RT[["mes.retry"]]
+
+    FILTERED --> LLM[LLM\nSelector]
+    LLM -->|≥0.85| SEL[["mes.llm.selected\n6p · 3d"]]
+    LLM -->|0.60~0.85\nfallback| SEL
+    LLM -->|<0.60| RT
+    LLM -->|unknown| DLQ[["mes.dlq\n1p · 30d"]]
+
+    SEL --> PARSER[Parser\nService]
+    PARSER -->|정상| PARSED[["mes.parsed\n6p · 3d"]]
+    PARSER -->|실패| RT
+
+    PARSED --> STORE[Storage\nService]
+    STORE -->|성공| DB[(Database)]
+    STORE -->|실패| RT
+
+    RT --> RETRY[Retry\nService]
+    RETRY -->|≤3회 Backoff| FILT
+    RETRY -->|>3회| DLQ
+    DLQ --> MON[DLQ\nMonitor]
+    MON --> ALERT([Slack 알림])
+
+    style MES fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style DB fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style ALERT fill:#3b1f1f,stroke:#f87171,color:#fca5a5
+    style DLQ fill:#3b1f1f,stroke:#f87171,color:#fca5a5
+    style RT fill:#3b2a00,stroke:#fbbf24,color:#fde68a
+      </div>
+    </div>
+    <div class="slide-num">2 / 8</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       SLIDE 3 — 토픽 설계표
+  ══════════════════════════════════════════ -->
+  <div class="slide" id="s3">
+    <div class="slide-title">A. Kafka 토픽 / 파티션 설계
+      <div class="slide-subtitle">처리량·내구성·보존 기준 설계</div>
+    </div>
+    <div class="two-col">
+      <div class="col-card">
+        <div class="col-title">토픽별 설계표</div>
+        <table>
+          <thead>
+            <tr><th>Topic</th><th>Partitions</th><th>Replication</th><th>Retention</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>mes.raw</td><td>12</td><td>3</td><td><span class="badge badge-blue">7일</span></td></tr>
+            <tr><td>mes.filtered</td><td>6</td><td>3</td><td><span class="badge badge-green">3일</span></td></tr>
+            <tr><td>mes.llm.selected</td><td>6</td><td>3</td><td><span class="badge badge-green">3일</span></td></tr>
+            <tr><td>mes.parsed</td><td>6</td><td>3</td><td><span class="badge badge-green">3일</span></td></tr>
+            <tr><td>mes.retry</td><td>3</td><td>3</td><td><span class="badge badge-yellow">7일</span></td></tr>
+            <tr><td>mes.dlq</td><td>1</td><td>3</td><td><span class="badge badge-red">30일</span></td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:16px; font-size:12px; color:#64748b; line-height:1.8;">
+          파티션 수 = 목표 처리량 ÷ 파티션당 처리량<br>
+          예: 6,000 msg/s ÷ 500 msg/s = <strong style="color:#7c83fd">12 파티션</strong>
+        </div>
+      </div>
+      <div class="col-card">
+        <div class="col-title">Producer 설정 (유실 방지)</div>
+        <pre><span class="kw">acks</span>                      = <span class="str">all</span>
+<span class="kw">retries</span>                   = <span class="num">10</span>
+<span class="kw">enable.idempotence</span>        = <span class="str">true</span>
+<span class="kw">max.in.flight.requests</span>   = <span class="num">1</span></pre>
+        <div class="col-title" style="margin-top:18px">Consumer 설정 (수동 commit)</div>
+        <pre><span class="kw">enable.auto.commit</span>  = <span class="str">false</span>
+<span class="kw">auto.offset.reset</span>   = <span class="str">earliest</span>
+<span class="kw">max.poll.records</span>    = <span class="num">50</span></pre>
+      </div>
+    </div>
+    <div class="slide-num">3 / 8</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       SLIDE 4 — Consumer Group
+  ══════════════════════════════════════════ -->
+  <div class="slide" id="s4">
+    <div class="slide-title">A. Consumer Group 구성
+      <div class="slide-subtitle">토픽 → 서비스 매핑</div>
+    </div>
+    <div class="mermaid-wrap">
+      <div class="mermaid">
+flowchart TD
+    subgraph TOPICS["Kafka Topics"]
+        T1["mes.raw"]
+        T2["mes.filtered"]
+        T3["mes.llm.selected"]
+        T4["mes.parsed"]
+        T5["mes.retry"]
+        T6["mes.dlq"]
+    end
+
+    subgraph GROUPS["Consumer Groups"]
+        G1["filter-service"]
+        G2["eds-service\n(LLM Selector)"]
+        G3["parser-service"]
+        G4["storage-service"]
+        G5["retry-service"]
+        G6["dlq-monitor"]
+    end
+
+    T1 --> G1
+    T2 --> G2
+    T3 --> G3
+    T4 --> G4
+    T5 --> G5
+    T6 --> G6
+
+    style TOPICS fill:#0f172a,stroke:#334155
+    style GROUPS fill:#0f172a,stroke:#334155
+    style T1 fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style T2 fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style T3 fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style T4 fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style T5 fill:#3b2a00,stroke:#fbbf24,color:#fde68a
+    style T6 fill:#3b1f1f,stroke:#f87171,color:#fca5a5
+      </div>
+    </div>
+    <div class="slide-num">4 / 8</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       SLIDE 5 — Parser Plugin
+  ══════════════════════════════════════════ -->
+  <div class="slide" id="s5">
+    <div class="slide-title">B. Parser 플러그인 구조
+      <div class="slide-subtitle">인터페이스 통일 · subprocess 격리 · 핫로딩</div>
+    </div>
+    <div class="two-col">
+      <div class="col-card">
+        <div class="col-title">플러그인 아키텍처</div>
+        <div class="mermaid">
+flowchart TD
+    MSG["mes.llm.selected"] --> LOADER["plugin_loader.py\n파일 mtime 캐시 확인"]
+    LOADER -->|변경 없음| CACHE["캐시 인스턴스 반환"]
+    LOADER -->|변경 있음| REIMPORT["importlib 동적 로드\nPARSER_CLASS 추출"]
+    CACHE --> SBX["sandbox_runner.py\nsubprocess fork"]
+    REIMPORT --> SBX
+    SBX -->|timeout=10s| CHILD["plugin_runner_child.py"]
+    CHILD --> PARSED["mes.parsed 발행"]
+    CHILD -->|오류/타임아웃| RETRY["mes.retry 발행"]
+    style MSG fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style RETRY fill:#3b2a00,stroke:#fbbf24,color:#fde68a
+        </div>
+      </div>
+      <div class="col-card">
+        <div class="col-title">디렉토리 구조</div>
+        <pre style="margin-bottom:14px"><span class="cm">parser-service/</span>
+├── main.py            <span class="cm"># 진입점</span>
+├── plugin_loader.py   <span class="cm"># 핫로딩</span>
+├── base_parser.py     <span class="cm"># 추상 인터페이스</span>
+├── sandbox_runner.py  <span class="cm"># subprocess 격리</span>
+└── plugins/
+    ├── temp_parser.py
+    ├── pressure_parser.py
+    └── alarm_parser.py</pre>
+        <div class="col-title">BaseParser 인터페이스</div>
+        <pre><span class="kw">class</span> BaseParser(ABC):
+    <span class="cm"># 반드시 구현</span>
+    @abstractmethod
+    <span class="kw">def</span> parse(self, event: dict) -> dict: ...
+
+    <span class="cm"># 필요 시 오버라이드</span>
+    <span class="kw">def</span> validate_input(self, event) -> bool:
+        <span class="kw">return</span> <span class="str">"event_id"</span> <span class="kw">in</span> event</pre>
+      </div>
+    </div>
+    <div class="slide-num">5 / 8</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       SLIDE 6 — LLM Selector
+  ══════════════════════════════════════════ -->
+  <div class="slide" id="s6">
+    <div class="slide-title">C. LLM Selector 정확도 튜닝
+      <div class="slide-subtitle">프롬프트 설계 · confidence threshold · few-shot</div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:18px; flex:1; overflow:hidden;">
+      <div class="thresh-row">
+        <div class="thresh-card green">
+          <div class="thresh-val" style="color:#4ade80">≥ 0.85</div>
+          <div class="thresh-label">신뢰도 높음</div>
+          <div class="thresh-action" style="color:#4ade80">선택 parser 실행</div>
+        </div>
+        <div class="thresh-card yellow">
+          <div class="thresh-val" style="color:#fbbf24">0.60 ~ 0.85</div>
+          <div class="thresh-label">신뢰도 중간</div>
+          <div class="thresh-action" style="color:#fbbf24">fallback parser + 로그</div>
+        </div>
+        <div class="thresh-card red">
+          <div class="thresh-val" style="color:#f87171">&lt; 0.60</div>
+          <div class="thresh-label">신뢰도 낮음</div>
+          <div class="thresh-action" style="color:#f87171">mes.retry 전송</div>
+        </div>
+        <div class="thresh-card purple">
+          <div class="thresh-val" style="color:#a78bfa">unknown</div>
+          <div class="thresh-label">파서 미식별</div>
+          <div class="thresh-action" style="color:#a78bfa">mes.dlq 즉시 전송</div>
+        </div>
+      </div>
+      <div class="two-col" style="flex:1">
+        <div class="col-card">
+          <div class="col-title">시스템 프롬프트 핵심</div>
+          <pre style="font-size:11px">당신은 MES 이벤트 분류기입니다.
+
+규칙:
+1. 절대 파싱하지 않습니다
+2. 반드시 JSON만 출력합니다
+3. parser 목록:
+   temp_parser / pressure_parser
+   alarm_parser / unknown
+
+출력 형식:
+{
+  <span class="str">"parser"</span>: <span class="str">"&lt;name&gt;"</span>,
+  <span class="str">"confidence"</span>: <span class="num">0.0 ~ 1.0</span>
+}</pre>
+        </div>
+        <div class="col-card">
+          <div class="col-title">Few-shot 예시</div>
+          <pre style="font-size:11px"><span class="cm">입력:</span> TEMP_EXCEED → temp_parser <span class="num">0.97</span>
+<span class="cm">입력:</span> PRESS_WARN  → pressure_parser <span class="num">0.95</span>
+<span class="cm">입력:</span> ALM_001     → alarm_parser <span class="num">0.91</span>
+<span class="cm">입력:</span> UNKNOWN_XYZ → unknown <span class="num">0.30</span></pre>
+          <div class="col-title" style="margin-top:14px">Ollama 호출</div>
+          <pre style="font-size:11px">client.chat(
+  model=<span class="str">"qwen3:8b"</span>,
+  messages=[system, user],
+  format=<span class="str">"json"</span>  <span class="cm"># JSON 강제</span>
+)</pre>
+        </div>
+      </div>
+    </div>
+    <div class="slide-num">6 / 8</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       SLIDE 7 — Retry / DLQ
+  ══════════════════════════════════════════ -->
+  <div class="slide" id="s7">
+    <div class="slide-title">D. Retry / DLQ 운영 전략
+      <div class="slide-subtitle">Exponential Backoff · 단계별 재투입 · DLQ 모니터링</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px;flex:1;overflow:hidden;">
+      <!-- Backoff 타임라인 -->
+      <div class="col-card" style="flex-shrink:0">
+        <div class="col-title">Exponential Backoff (최대 3회)</div>
+        <div class="backoff-row">
+          <div class="backoff-item"><div class="backoff-n">0s</div><div class="backoff-t">1차 즉시</div></div>
+          <div class="backoff-item"><div class="backoff-n">30s</div><div class="backoff-t">2차</div></div>
+          <div class="backoff-item"><div class="backoff-n">5m</div><div class="backoff-t">3차</div></div>
+          <div class="backoff-item" style="background:rgba(248,113,113,0.08);border-color:rgba(248,113,113,0.2)">
+            <div class="backoff-n" style="color:#f87171">DLQ</div>
+            <div class="backoff-t">3회 초과</div>
+          </div>
+        </div>
+      </div>
+      <!-- 재투입 라우팅 + DLQ 운영 -->
+      <div class="two-col" style="flex:1">
+        <div class="col-card">
+          <div class="col-title">failed_stage 기반 재투입 라우팅</div>
+          <table>
+            <thead><tr><th>failed_stage</th><th>재투입 토픽</th></tr></thead>
+            <tbody>
+              <tr><td>llm_selector</td><td>mes.filtered</td></tr>
+              <tr><td>parser_service</td><td>mes.llm.selected</td></tr>
+              <tr><td>storage_service</td><td>mes.parsed</td></tr>
+              <tr><td>기타</td><td><span class="badge badge-red">mes.dlq</span></td></tr>
+            </tbody>
+          </table>
+          <div style="margin-top:14px">
+            <div class="col-title">Retry 메시지 구조</div>
+            <pre style="font-size:11px">{
+  <span class="str">"retry_count"</span>:     <span class="num">2</span>,
+  <span class="str">"last_error"</span>:      <span class="str">"Parser timeout"</span>,
+  <span class="str">"failed_stage"</span>:    <span class="str">"parser_service"</span>,
+  <span class="str">"first_failed_at"</span>: <span class="str">"2025-04-06T10:00Z"</span>
+}</pre>
+          </div>
+        </div>
+        <div class="col-card">
+          <div class="col-title">DLQ 운영 정책</div>
+          <table style="margin-bottom:14px">
+            <thead><tr><th>항목</th><th>값</th></tr></thead>
+            <tbody>
+              <tr><td>모니터링 주기</td><td>5분마다</td></tr>
+              <tr><td>알림 임계치</td><td><span class="badge badge-red">100건 초과</span></td></tr>
+              <tr><td>보존 기간</td><td>30일</td></tr>
+              <tr><td>알림 채널</td><td>Slack / PagerDuty</td></tr>
+            </tbody>
+          </table>
+          <div class="col-title">수동 재처리 절차</div>
+          <div style="font-size:13px;color:#94a3b8;line-height:2;padding-left:4px">
+            1. DLQ 메시지 원인 분석<br>
+            2. 플러그인 수정 or 데이터 정제<br>
+            3. mes.retry 수동 재투입<br>
+            4. 처리 결과 확인
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="slide-num">7 / 8</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       SLIDE 8 — 요약
+  ══════════════════════════════════════════ -->
+  <div class="slide" id="s8">
+    <div class="slide-title">전체 설계 요약
+      <div class="slide-subtitle">A · B · C · D 핵심 결론</div>
+    </div>
+    <div class="summary-grid">
+      <div class="sum-card">
+        <h3>A. Kafka 토픽/파티션</h3>
+        <ul>
+          <li>mes.raw 12 파티션 (6,000 msg/s 기준)</li>
+          <li>전 토픽 RF=3 (내구성 보장)</li>
+          <li>Producer: acks=all + idempotence</li>
+          <li>Consumer: 수동 commit + earliest reset</li>
+        </ul>
+      </div>
+      <div class="sum-card">
+        <h3>B. Parser 플러그인</h3>
+        <ul>
+          <li>BaseParser 추상 인터페이스 통일</li>
+          <li>subprocess 격리로 플러그인 오류 차단</li>
+          <li>파일 mtime 기반 핫로딩 (재시작 불필요)</li>
+          <li>timeout=10s 강제 종료 보호</li>
+        </ul>
+      </div>
+      <div class="sum-card">
+        <h3>C. LLM Selector</h3>
+        <ul>
+          <li>qwen3:8b + Ollama, format=json 강제</li>
+          <li>confidence ≥ 0.85 → 직행</li>
+          <li>0.60~0.85 → fallback parser + 로그</li>
+          <li>unknown / &lt;0.60 → retry or dlq</li>
+        </ul>
+      </div>
+      <div class="sum-card">
+        <h3>D. Retry / DLQ</h3>
+        <ul>
+          <li>최대 3회, Backoff 0s/30s/5m</li>
+          <li>failed_stage 기반 최적 재투입 토픽</li>
+          <li>DLQ 100건 초과 시 Slack 알림</li>
+          <li>30일 보존 → 수동 재처리 여유</li>
+        </ul>
+      </div>
+    </div>
+    <div style="margin-top:16px; text-align:center; font-size:13px; color:#4a5568;">
+      다음 단계: &nbsp;
+      <span class="badge badge-blue">E. Docker Compose 구성</span> &nbsp;
+      <span class="badge badge-blue">F. Ollama 연동 코드 완성</span> &nbsp;
+      <span class="badge badge-blue">G. CLAUDE.md 작성</span>
+    </div>
+    <div class="slide-num">8 / 8</div>
+  </div>
+
+</div><!-- /deck -->
+
+<!-- ── 네비게이션 ── -->
+<div id="nav">
+  <button id="prev" onclick="go(-1)">← 이전</button>
+  <span id="slide-counter">1 / 8</span>
+  <button id="next" onclick="go(1)">다음 →</button>
+</div>
+
+<div id="dots"></div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1e3a5f',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#60a5fa',
+      lineColor: '#4a5568',
+      secondaryColor: '#1a1a2e',
+      tertiaryColor: '#0f0f1a',
+      edgeLabelBackground: '#1a1a2e',
+      fontFamily: 'Segoe UI, Noto Sans KR, sans-serif',
+    },
+    flowchart: { htmlLabels: true, curve: 'basis' },
+  });
+
+  const slides = document.querySelectorAll('.slide');
+  const total  = slides.length;
+  let cur = 0;
+
+  // 점 인디케이터 생성
+  const dotsEl = document.getElementById('dots');
+  slides.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    d.onclick = () => goTo(i);
+    dotsEl.appendChild(d);
+  });
+
+  function goTo(n) {
+    slides[cur].classList.remove('active');
+    dotsEl.children[cur].classList.remove('active');
+    cur = Math.max(0, Math.min(n, total - 1));
+    slides[cur].classList.add('active');
+    dotsEl.children[cur].classList.add('active');
+    document.getElementById('slide-counter').textContent = (cur+1) + ' / ' + total;
+    document.getElementById('prev').disabled = cur === 0;
+    document.getElementById('next').disabled = cur === total - 1;
+  }
+
+  function go(d) { goTo(cur + d); }
+
+  // 키보드 네비게이션
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') go(1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')  go(-1);
+  });
+
+  goTo(0);
+</script>
+</body>
+</html>
